@@ -48,11 +48,10 @@ def get_wallet(phone: str):
             return {"status": "error", "message": "العميل غير موجود في أودو"}
 
         # جلب اسم العميل ورصيده (credit) برقم ID
-        partner_data = models.execute_kw(
+                partner_data = models.execute_kw(
             ODOO_DB, uid, ODOO_PASSWORD,
             'res.partner', 'read',
-            [partner_ids],
-            {'fields': ['name', 'credit', 'phone']}
+            [partner_ids]
         )
 
         return {
