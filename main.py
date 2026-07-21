@@ -4,11 +4,12 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-# قراءة المتغيرات وتنظيف الرابط
+# 1. قراءة المتغيرات وتنظيف الرابط تلقائياً
 raw_url = os.getenv("ODOO_URL", "").strip().rstrip('/')
 if raw_url and not raw_url.startswith(("http://", "https://")):
     raw_url = f"https://{raw_url}"
 
+# إزالة كلمة /odoo لو كانت موجودة بالخطأ في نهاية الرابط
 if raw_url.endswith("/odoo"):
     raw_url = raw_url[:-5]
 
@@ -17,27 +18,29 @@ ODOO_DB = os.getenv("ODOO_DB", "").strip()
 ODOO_USERNAME = os.getenv("ODOO_USERNAME", "").strip()
 ODOO_PASSWORD = os.getenv("ODOO_PASSWORD", "").strip()
 
+
 @app.get("/")
 def home():
-    return {"status": "API running"}
+    return {"status": "API running successfully"}
+
 
 @app.get("/get_wallet/{phone}")
 def get_wallet(phone: str):
     try:
-        # 1. الاتصال وتسجيل الدخول
+        # الاتصال بسيرفر تسجيل الدخول
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_PASSWORD, {})
         
         if not uid:
             raise HTTPException(
                 status_code=401, 
-                detail="فشل تسجيل الدخول في أودو!"
+                detail="فشل تسجيل الدخول في أودو! تأكد من المتغيرات في Render."
             )
 
-        # 2. الاتصال بسيرفر البيانات
+        # الاتصال بسيرفر البيانات
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
         
-        # البحث عن العميل بواسطة حقل phone
+        # البحث عن العميل بواسطة رقم الهاتف
         partner_ids = models.execute_kw(
             ODOO_DB, uid, ODOO_PASSWORD,
             'res.partner', 'search',
@@ -47,8 +50,8 @@ def get_wallet(phone: str):
         if not partner_ids:
             return {"status": "error", "message": "العميل غير موجود في أودو"}
 
-        # جلب اسم العميل ورصيده (credit) برقم ID
-                partner_data = models.execute_kw(
+        # جلب كل بيانات العميل المتاحة لرؤية اسم حقل المحفظة الصحيح
+        partner_data = models.execute_kw(
             ODOO_DB, uid, ODOO_PASSWORD,
             'res.partner', 'read',
             [partner_ids]
