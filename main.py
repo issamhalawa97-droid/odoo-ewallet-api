@@ -26,20 +26,16 @@ def home():
 @app.get("/get_wallet/{phone}")
 def get_wallet(phone: str):
     try:
-        # الاتصال بـ Odoo Authenticate
+        # 1. تسجيل الدخول
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_PASSWORD, {})
         
         if not uid:
-            raise HTTPException(
-                status_code=401, 
-                detail="فشل تسجيل الدخول في أودو! تأكد من بيانات الاعتماد."
-            )
+            raise HTTPException(status_code=401, detail="فشل تسجيل الدخول في أودو!")
 
-        # الاتصال بـ Odoo Models
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
         
-        # البحث عن العميل بـ phone
+        # 2. البحث عن العميل بواسطة رقم الهاتف
         partner_ids = models.execute_kw(
             ODOO_DB, uid, ODOO_PASSWORD,
             'res.partner', 'search',
@@ -49,25 +45,53 @@ def get_wallet(phone: str):
         if not partner_ids:
             return {"status": "error", "message": "العميل غير موجود في أودو"}
 
-        # جلب الحقول الأساسية المطلوبة فقط
+        partner_id = partner_ids[0]
+
+        # جلب بيانات العميل الأساسية
         partner_data = models.execute_kw(
             ODOO_DB, uid, ODOO_PASSWORD,
             'res.partner', 'read',
-            [partner_ids],
+            [[partner_id]],
             {'fields': ['id', 'name', 'phone', 'credit', 'currency_id']}
-        )
+        )[0]
 
-        customer = partner_data[0]
+        wallet_balance = 0.0
+        found_wallet = False
 
-        # استخراج اسم العملة بشكل نظيف
-        currency_name = customer['currency_id'][1] if customer.get('currency_id') else "ILS"
+        # 3. محاولة جلب رصيد المحفظة من موديول eWallet / Loyalty Card
+        try:
+            card_ids = models.execute_kw(
+                ODOO_DB, uid, ODOO_PASSWORD,
+                'loyalty.card', 'search',
+                [[['partner_id', '=', partner_id]]]
+            )
+            
+            if card_ids:
+                cards_data = models.execute_kw(
+                    ODOO_DB, uid, ODOO_PASSWORD,
+                    'loyalty.card', 'read',
+                    [card_ids],
+                    {'fields': ['points', 'program_type']}
+                )
+                
+                # جمع نقاط/رصيد المحفظة للعميل
+                total_points = sum(c.get('points', 0.0) for c in cards_data)
+                wallet_balance = total_points
+                found_wallet = True
+        except Exception:
+            # في حال لم يكن موديول loyalty.card مثبتاً
+            pass
+
+        # إذا لم نجد محفظة eWallet نستخدم قيمة credit الاحتياطية
+        final_balance = wallet_balance if found_wallet else partner_data.get("credit", 0.0)
+        currency_name = partner_data['currency_id'][1] if partner_data.get('currency_id') else "ILS"
 
         return {
             "status": "success",
-            "customer_id": customer.get("id"),
-            "name": customer.get("name"),
-            "phone": customer.get("phone"),
-            "balance": customer.get("credit", 0.0),
+            "customer_id": partner_data.get("id"),
+            "name": partner_data.get("name"),
+            "phone": partner_data.get("phone"),
+            "wallet_balance": final_balance,
             "currency": currency_name
         }
 
